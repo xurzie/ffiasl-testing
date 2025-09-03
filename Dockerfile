@@ -1,4 +1,3 @@
-# можно без платформы в FROM (платформу задаём в команде build/run)
 FROM ubuntu:22.04
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
@@ -6,23 +5,19 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     libgmp-dev libssl-dev wget unzip pkg-config nodejs npm libgtest-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# собираем статические библиотеки gtest
 RUN cmake -S /usr/src/googletest/googletest -B /tmp/gtest -DCMAKE_POSITION_INDEPENDENT_CODE=ON && \
     cmake --build /tmp/gtest && \
     cp /tmp/gtest/lib/*.a /usr/lib/
 
 WORKDIR /work
 
-# поля BN254: Fr и Fq
 RUN npm i -g ffiasm
 RUN buildzqfield -q 21888242871839275222246405745257275088548364400416034343698204186575808495617 -n Fr
 RUN buildzqfield -q 21888242871839275222246405745257275088548364400416034343698204186575808495617 -n Fq
 
-# исходники теста и alt_bn128
 RUN git clone --depth 1 https://github.com/iden3/ffiasm.git
 RUN cp ffiasm/c/alt_bn128_test.cpp .
 
-# сборка
 RUN nasm -felf64 fr.asm -o fr.o && \
     nasm -felf64 fq.asm -o fq.o && \
     g++ -std=c++17 -O3 -I . -I ffiasm/c \
@@ -32,8 +27,6 @@ RUN nasm -felf64 fr.asm -o fr.o && \
        /usr/lib/libgtest.a -pthread -lgmp \
        -o alt_bn128_test
 
-# на всякий случай — убедимся, что бинарник на месте и исполнимый
 RUN ls -lah /work && stat /work/alt_bn128_test && chmod +x /work/alt_bn128_test
 
-# запускать по абсолютному пути
 CMD ["/work/alt_bn128_test","--gtest_color=yes"]
