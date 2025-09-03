@@ -1,59 +1,63 @@
-name: alt_bn128 tests (ffiasm)
+name: ffiasm tests
 
 on:
   push:
   pull_request:
-  workflow_dispatch:
 
 jobs:
   test:
     runs-on: ubuntu-22.04
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Deps (build tools, GMP, gtest)
+      - name: Show CPU (проверим ADX)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential nasm cmake curl git libgmp-dev
-          # gtest: соберём статические .a
-          sudo apt-get install -y libgtest-dev
+          uname -a
+          lscpu
+          grep -m1 -o ' adx ' /proc/cpuinfo || true
+
+      - name: Apt deps (с повторами)
+        run: |
+          sudo apt-get update -o Acquire::Retries=5
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            build-essential nasm cmake curl libgmp-dev nodejs npm libgtest-dev
+
+      - name: Build gtest (нужны статические .a)
+        run: |
           cmake -S /usr/src/googletest/googletest -B /tmp/gtest -DCMAKE_POSITION_INDEPENDENT_CODE=ON
           cmake --build /tmp/gtest
           sudo cp /tmp/gtest/lib/*.a /usr/lib/
 
-      - name: Node for ffiasm
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install ffiasm
-        run: npm i -g ffiasm
-
-      - name: Generate fields (Fr, Fq)
-        working-directory: .
+      - name: gen Fq/Fr с ffiasm
         run: |
+          npm i -g ffiasm
           buildzqfield -q 21888242871839275222246405745257275088548364400416034343698204186575808495617 -n Fr
           buildzqfield -q 21888242871839275222246405745257275088548364400416034343698204186575808495617 -n Fq
+
+      - name: Подтянуть тест и исходники поля
+        run: |
+          mkdir -p third_party && cd third_party
+          git clone --depth 1 https://github.com/iden3/ffiasm.git
+          cp ffiasm/c/alt_bn128_test.cpp ../
+          cd ..
+
+      - name: Сборка alt_bn128_test
+        run: |
           nasm -felf64 fr.asm -o fr.o
           nasm -felf64 fq.asm -o fq.o
-
-      - name: Fetch test source
-        run: |
-          curl -L -o alt_bn128_test.cpp https://raw.githubusercontent.com/iden3/ffiasm/master/c/alt_bn128_test.cpp
-          git clone --depth 1 https://github.com/iden3/ffiasm.git
-
-      - name: Build test binary
-        run: |
-          g++ -std=c++17 -O3 -I . -I ffiasm/c \
+          g++ -std=c++17 -O3 -I . -I third_party/ffiasm/c \
             fr.o fr.cpp fq.o fq.cpp \
-            ffiasm/c/alt_bn128.cpp ffiasm/c/naf.cpp ffiasm/c/splitparstr.cpp ffiasm/c/misc.cpp \
-            /usr/lib/libgtest.a /usr/lib/libgtest_main.a -lgmp -pthread \
+            third_party/ffiasm/c/alt_bn128.cpp \
+            third_party/ffiasm/c/naf.cpp \
+            third_party/ffiasm/c/splitparstr.cpp \
+            third_party/ffiasm/c/misc.cpp \
+            /usr/lib/libgtest.a -lgmp -pthread \
             alt_bn128_test.cpp -o alt_bn128_test
+          file ./alt_bn128_test
+          ./alt_bn128_test --gtest_color=yes --gtest_brief=1 --gtest_list_tests
 
-      - name: Smoke: list tests
-        run: ./alt_bn128_test --gtest_list_tests
-
-      - name: Run a quick test
-        run: ./alt_bn128_test --gtest_color=yes --gtest_brief=1 --gtest_filter=altBn128.f2_simpleMul
+      - name: Запуск пары тестов (пример)
+        run: |
+          ./alt_bn128_test --gtest_color=yes --gtest_filter=altBn128.f2_simpleMul
+          ./alt_bn128_test --gtest_color=yes --gtest_filter=altBn128.g1_times_3
