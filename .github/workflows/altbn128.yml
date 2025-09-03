@@ -1,63 +1,94 @@
-name: ffiasm tests
+name: altbn128-tests
 
 on:
   push:
-  pull_request:
+    paths:
+      - ".github/workflows/altbn128.yml"
+  workflow_dispatch:
+    inputs:
+      filter:
+        description: 'gtest filter (например altBn128.f2_simpleMul)'
+        required: false
+        default: '*'
+      list_only:
+        description: 'Только вывести список тестов'
+        type: boolean
+        default: false
 
 jobs:
   test:
     runs-on: ubuntu-22.04
+    timeout-minutes: 45
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Show CPU (проверим ADX)
+      - name: Sysinfo (CPU flags важны для ADX/BMI2)
         run: |
           uname -a
-          lscpu
-          grep -m1 -o ' adx ' /proc/cpuinfo || true
+          lscpu || true
+          grep -m1 '^flags' /proc/cpuinfo || true
 
-      - name: Apt deps (с повторами)
+      - name: Install build deps
         run: |
-          sudo apt-get update -o Acquire::Retries=5
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            build-essential nasm cmake curl libgmp-dev nodejs npm libgtest-dev
+          sudo apt-get update
+          sudo apt-get install -y build-essential nasm cmake git libgmp-dev nodejs npm
 
-      - name: Build gtest (нужны статические .a)
+      - name: Install gtest (static)
         run: |
+          sudo apt-get install -y libgtest-dev
           cmake -S /usr/src/googletest/googletest -B /tmp/gtest -DCMAKE_POSITION_INDEPENDENT_CODE=ON
           cmake --build /tmp/gtest
           sudo cp /tmp/gtest/lib/*.a /usr/lib/
 
-      - name: gen Fq/Fr с ffiasm
+      - name: Install ffiasm cli
+        run: sudo npm i -g ffiasm
+
+      - name: Generate fields (Fr & Fq)
         run: |
-          npm i -g ffiasm
           buildzqfield -q 21888242871839275222246405745257275088548364400416034343698204186575808495617 -n Fr
           buildzqfield -q 21888242871839275222246405745257275088548364400416034343698204186575808495617 -n Fq
 
-      - name: Подтянуть тест и исходники поля
+      - name: Fetch iden3/ffiasm sources used by tests
         run: |
-          mkdir -p third_party && cd third_party
-          git clone --depth 1 https://github.com/iden3/ffiasm.git
-          cp ffiasm/c/alt_bn128_test.cpp ../
-          cd ..
+          git clone --depth 1 https://github.com/iden3/ffiasm.git ext_ffiasm
+          cp ext_ffiasm/c/alt_bn128_test.cpp .
 
-      - name: Сборка alt_bn128_test
+      - name: Build alt_bn128_test
         run: |
+          set -euxo pipefail
           nasm -felf64 fr.asm -o fr.o
           nasm -felf64 fq.asm -o fq.o
-          g++ -std=c++17 -O3 -I . -I third_party/ffiasm/c \
-            fr.o fr.cpp fq.o fq.cpp \
-            third_party/ffiasm/c/alt_bn128.cpp \
-            third_party/ffiasm/c/naf.cpp \
-            third_party/ffiasm/c/splitparstr.cpp \
-            third_party/ffiasm/c/misc.cpp \
-            /usr/lib/libgtest.a -lgmp -pthread \
-            alt_bn128_test.cpp -o alt_bn128_test
-          file ./alt_bn128_test
-          ./alt_bn128_test --gtest_color=yes --gtest_brief=1 --gtest_list_tests
+          g++ -std=c++17 -O3 -I . -I ext_ffiasm/c \
+             fr.o fr.cpp fq.o fq.cpp \
+             ext_ffiasm/c/alt_bn128.cpp ext_ffiasm/c/naf.cpp ext_ffiasm/c/splitparstr.cpp ext_ffiasm/c/misc.cpp \
+             /usr/lib/libgtest.a /usr/lib/libgtest_main.a -lgmp -pthread \
+             alt_bn128_test.cpp -o alt_bn128_test
+          file alt_bn128_test || true
+          objdump -f alt_bn128_test || true
 
-      - name: Запуск пары тестов (пример)
+      - name: Inspect ASM for ADX/BMI2 usage
         run: |
-          ./alt_bn128_test --gtest_color=yes --gtest_filter=altBn128.f2_simpleMul
-          ./alt_bn128_test --gtest_color=yes --gtest_filter=altBn128.g1_times_3
+          (objdump -d fr.o | egrep -n 'mulx|adcx|adox' || true) | tee asm_ops.txt
+
+      - name: List tests
+        id: list
+        continue-on-error: true
+        run: ./alt_bn128_test --gtest_list_tests | tee tests.list
+
+      - name: Run tests (or selected)
+        if: ${{ inputs.list_only != true }}
+        run: |
+          ./alt_bn128_test --gtest_color=yes --gtest_filter='${{ inputs.filter }}' | tee test.run.log
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: altbn128-build-and-logs
+          path: |
+            alt_bn128_test
+            tests.list
+            test.run.log
+            asm_ops.txt
+            fr.*
+            fq.*
