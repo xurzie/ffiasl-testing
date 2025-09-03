@@ -1,79 +1,53 @@
 name: ffiasm-smoke
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - ".github/workflows/ffiasm.yml"
-  workflow_dispatch: {}
+      - "**/*.cpp"
+      - "**/*.hpp"
+      - "**/*.asm"
 
 jobs:
   smoke:
     runs-on: ubuntu-22.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Sysinfo
-        run: |
-          uname -a
-          lscpu || true
-          grep -m1 -i 'model name' /proc/cpuinfo || true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Install deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential nasm libgmp-dev nodejs npm
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            build-essential nasm libgmp-dev nodejs npm
 
-      - name: Install ffiasm cli
-        run: sudo npm i -g ffiasm
-
-      - name: Generate field (Fr)
-        run: buildzqfield -q 21888242871839275222246405745257275088548364400416034343698204186575808495617 -n Fr
-
-      - name: Build tiny example
+      - name: Gen + build minimal example
         run: |
-          cat > main.cpp <<'CPP'
+          npm i -g ffiasm
+          buildzqfield -q 21888242871839275222246405745257275088548364400416034343698204186575808495617 -n Fr
+          cat > main.cpp << 'CPP'
           #include <stdio.h>
           #include <stdlib.h>
           #include "fr.hpp"
           int main() {
-            #ifdef __cplusplus
-            extern "C" { void Fr_init(); }
-            #endif
-            // Fr_init может быть, а может и не быть — сделаем слабый вызов
-            #if defined(__has_include)
-            # if __has_include("fr.hpp")
-              // просто попробуем вызвать, линкер сам разберётся
-              Fr_init();
-            # endif
-            #endif
-            FrElement a; a.type = Fr_SHORT; a.shortVal = 2;
-            FrElement b; b.type = Fr_SHORT; b.shortVal = 6;
+            Fr_init();
+            FrElement a{.type=Fr_SHORT,.shortVal=2};
+            FrElement b{.type=Fr_SHORT,.shortVal=6};
             FrElement c;
-            Fr_mul(&c, &a, &b);
-            char *s = Fr_element2str(&c);
-            puts(s);
+            Fr_mul(&c,&a,&b);
+            char* s=Fr_element2str(&c);
+            printf("%s\n", s);
             free(s);
             return 0;
           }
           CPP
           nasm -felf64 fr.asm -o fr.o
           g++ -std=c++17 -O3 main.cpp fr.o fr.cpp -lgmp -o example
+          ./example | tee /tmp/out.txt
+          grep -q "12" /tmp/out.txt
 
-      - name: Run example
+      - name: Inspect ADX
         run: |
-          set -x
-          ./example | tee example.out
-          grep -q "12" example.out
-
-      - name: Upload artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ffiasm-smoke-artifacts
-          path: |
-            example
-            example.out
-            fr.asm
-            fr.cpp
-            fr.hpp
+          objdump -d fr.o | egrep -n 'adcx|adox|mulx' || true
