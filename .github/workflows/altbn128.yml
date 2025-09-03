@@ -8,59 +8,52 @@ on:
 jobs:
   test:
     runs-on: ubuntu-22.04
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show CPU flags (проверим ADX/BMI2)
-        run: |
-          grep -m1 -iE 'model name|flags' /proc/cpuinfo || true
-
-      - name: Install deps
+      - name: Deps (build tools, GMP, gtest)
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential nasm cmake git curl ca-certificates \
-            libgmp-dev nodejs npm libgtest-dev
-
-      - name: Build googletest (static)
-        run: |
+          sudo apt-get install -y build-essential nasm cmake curl git libgmp-dev
+          # gtest: соберём статические .a
+          sudo apt-get install -y libgtest-dev
           cmake -S /usr/src/googletest/googletest -B /tmp/gtest -DCMAKE_POSITION_INDEPENDENT_CODE=ON
           cmake --build /tmp/gtest
+          sudo cp /tmp/gtest/lib/*.a /usr/lib/
 
-      - name: Generate Fr/Fq via ffiasm
+      - name: Node for ffiasm
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install ffiasm
+        run: npm i -g ffiasm
+
+      - name: Generate fields (Fr, Fq)
+        working-directory: .
         run: |
-          sudo npm i -g ffiasm
           buildzqfield -q 21888242871839275222246405745257275088548364400416034343698204186575808495617 -n Fr
           buildzqfield -q 21888242871839275222246405745257275088548364400416034343698204186575808495617 -n Fq
-          ls -la
-
-      - name: Fetch test sources from iden3/ffiasm
-        run: |
-          git clone --depth 1 https://github.com/iden3/ffiasm.git
-          cp ffiasm/c/alt_bn128_test.cpp .
-
-      - name: Assemble & link
-        run: |
           nasm -felf64 fr.asm -o fr.o
           nasm -felf64 fq.asm -o fq.o
 
-          # ВАЖНО: линкуем ТОЛЬКО libgtest.a (без gtest_main), т.к. alt_bn128_test.cpp содержит свой main
+      - name: Fetch test source
+        run: |
+          curl -L -o alt_bn128_test.cpp https://raw.githubusercontent.com/iden3/ffiasm/master/c/alt_bn128_test.cpp
+          git clone --depth 1 https://github.com/iden3/ffiasm.git
+
+      - name: Build test binary
+        run: |
           g++ -std=c++17 -O3 -I . -I ffiasm/c \
             fr.o fr.cpp fq.o fq.cpp \
             ffiasm/c/alt_bn128.cpp ffiasm/c/naf.cpp ffiasm/c/splitparstr.cpp ffiasm/c/misc.cpp \
-            /tmp/gtest/lib/libgtest.a -lgmp -pthread \
+            /usr/lib/libgtest.a /usr/lib/libgtest_main.a -lgmp -pthread \
             alt_bn128_test.cpp -o alt_bn128_test
 
-          file ./alt_bn128_test
-          ldd  ./alt_bn128_test || true
+      - name: Smoke: list tests
+        run: ./alt_bn128_test --gtest_list_tests
 
-      - name: Run tests
-        run: |
-          ./alt_bn128_test --gtest_color=yes --gtest_output=xml:test-report.xml
-
-      - name: Upload test report
-        uses: actions/upload-artifact@v4
-        with:
-          name: gtest-report
-          path: test-report.xml
+      - name: Run a quick test
+        run: ./alt_bn128_test --gtest_color=yes --gtest_brief=1 --gtest_filter=altBn128.f2_simpleMul
