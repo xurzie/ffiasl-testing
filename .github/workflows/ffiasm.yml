@@ -1,56 +1,36 @@
-name: ffiasm-smoke
-
-on:
-  workflow_dispatch:
-  push:
-    paths:
-      - ".github/workflows/ffiasm.yml"
-      - "**/*.cpp"
-      - "**/*.hpp"
-      - "**/*.asm"
+name: ffiasm tests
+on: [push, workflow_dispatch]
 
 jobs:
-  smoke:
+  test:
     runs-on: ubuntu-22.04
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install deps
+      - name: Deps
         run: |
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            build-essential nasm libgmp-dev nodejs npm
+          sudo apt-get install -y build-essential nasm cmake pkg-config libgmp-dev
+          curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+          sudo apt-get install -y nodejs
 
-      - name: Gen + build minimal example
+      - name: Sync upstream ffiasm tests
+        run: |
+          bash scripts/sync_ffiasm_tests.sh
+        shell: bash
+
+      - name: Generate BN254 fields (Fr/Fq)
         run: |
           npm i -g ffiasm
-          buildzqfield -q 21888242871839275222246405745257275088548364400416034343698204186575808495617 -n Fr
-          cat > main.cpp << 'CPP'
-          #include "fr.hpp"
-          #include <cstdio>
-          #include <cstdlib>
+          Q=21888242871839275222246405745257275088548364400416034343698204186575808495617
+          buildzqfield -q $Q -n Fr
+          buildzqfield -q $Q -n Fq
 
-          int main() {
-            FrElement a; a.type = Fr_SHORT; a.shortVal = 2;   
-            FrElement b; b.type = Fr_SHORT; b.shortVal = 6; 
-            FrElement r;
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
-            Fr_mul(&r, &a, &b); // r = a * b mod p
+      - name: Build
+        run: cmake --build build -j
 
-            char* s = Fr_element2str(&r); 
-            printf("%s\n", s);            
-            free(s);
-            return 0;
-          }
-
-          CPP
-          nasm -felf64 fr.asm -o fr.o
-          g++ -std=c++17 -O3 main.cpp fr.o fr.cpp -lgmp -o example
-          ./example | tee /tmp/out.txt
-          grep -q "12" /tmp/out.txt
-
-      - name: Inspect ADX
-        run: |
-          objdump -d fr.o | egrep -n 'adcx|adox|mulx' || true
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
