@@ -47,18 +47,20 @@ FetchContent_MakeAvailable(googletest)
 
 # Собираем тесты из upstream/test + конкретный alt_bn128_test.cpp из upstream/c
 # === ffiasm upstream: собираем ТОЛЬКО alt_bn128.cpp ===
+# ВАЖНО: шаблонные реализации из c/*.cpp НЕ компилируем отдельно —
+# их уже инклюдит alt_bn128.cpp. Подтягиваем только несеттерплейтные .cpp.
 set(FFIASM_UPSTREAM_C_SOURCES
-  ${FFIASM_VENDOR}/c/alt_bn128.cpp
+  ${FFIASM_VENDOR}/c/alt_bn128.cpp     # основной TU
+  ${FFIASM_VENDOR}/c/splitparstr.cpp   # splitParStr(...)
+  ${FFIASM_VENDOR}/c/naf.cpp           # buildNaf(...)
+  ${FFIASM_VENDOR}/c/misc.cpp          # log2(unsigned)
 )
-
-# важно: не добавляем curve.cpp, f2field.cpp, f6field.cpp, f12field.cpp,
-# fft.cpp, naf.cpp, scalar.cpp, splitparstr.cpp и прочие — они включаются из alt_bn128.cpp
 
 add_library(ffiasm_upstream STATIC ${FFIASM_UPSTREAM_C_SOURCES})
 target_include_directories(ffiasm_upstream PUBLIC
   ${FFIASM_VENDOR}/c
   ${FFIASM_GEN_DIR}                # fr.hpp / fq.hpp от buildzqfield
-  ${FFIASM_VENDOR}/test/tester     # если хелперы из tester/*.hpp понадобятся
+  ${FFIASM_VENDOR}/test/tester     # если какие-то хелперы из tester/*.hpp понадобятся
 )
 target_link_libraries(ffiasm_upstream PRIVATE PkgConfig::GMP)
 
