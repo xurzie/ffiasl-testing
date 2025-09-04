@@ -1,14 +1,14 @@
 name: CI
 
 on:
-  push:            # запускать на каждый пуш
+  push:
     branches: ["**"]
-  pull_request:    # и на PR
+  pull_request:
     branches: ["**"]
-  workflow_dispatch: {}   # и руками из UI
+  workflow_dispatch: {}
 
 jobs:
-  build:
+  smoke:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -17,15 +17,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y nasm g++ libgmp-dev
-          node -v || true
-          npm -v || true
 
-      - name: Install ffiasm and generate field
+      - name: Install ffiasm & gen Fr
         run: |
           npm i -g ffiasm
           buildzqfield -q 21888242871839275222246405745257275088548364400416034343698204186575808495617 -n Fr
 
-      - name: Create main.cpp
+      - name: Create main.cpp (smoke)
         run: |
           cat > main.cpp <<'CPP'
           #include <gmp.h>
@@ -45,10 +43,67 @@ jobs:
           }
           CPP
 
-      - name: Build
+      - name: Build (smoke)
         run: |
           nasm -felf64 fr.asm -o fr.o
           g++ -std=c++17 -O3 main.cpp fr.o fr.cpp -lgmp -o example
 
-      - name: Run
+      - name: Run (smoke)
         run: ./example
+
+  full-tests:
+    runs-on: ubuntu-22.04
+    needs: smoke
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System deps + gtest
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm g++ libgmp-dev cmake git
+          # Сборка статических libgtest*.a
+          sudo cmake -S /usr/src/googletest/googletest -B /tmp/gtest -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+          sudo cmake --build /tmp/gtest
+          sudo cp /tmp/gtest/lib/*.a /usr/lib/
+
+      - name: Install ffiasm & gen fields
+        run: |
+          npm i -g ffiasm
+          # Нужно и Fq, и Fr для alt_bn128
+          buildzqfield -q 21888242871839275222246405745257275088548364400416034343698204186575808495617 -n Fr
+          buildzqfield -q 21888242871839275222246405745257275088548364400416034343698204186575808495617 -n Fq
+
+      - name: Fetch ffiasm test sources
+        run: |
+          git clone --depth 1 https://github.com/iden3/ffiasm.git ffiasm_src
+          cp ffiasm_src/c/alt_bn128_test.cpp .
+          # Собираем минимальный набор зависимостей тестера:
+          #   alt_bn128.cpp, naf.cpp, splitparstr.cpp, misc.cpp
+          # (этого хватает для alt_bn128_test.cpp)
+          echo "OK"
+
+      - name: Build alt_bn128_test
+        run: |
+          nasm -felf64 fr.asm -o fr.o
+          nasm -felf64 fq.asm -o fq.o
+          g++ -std=c++17 -O3 -I . -I ffiasm_src/c \
+            fr.o fr.cpp fq.o fq.cpp \
+            ffiasm_src/c/alt_bn128.cpp \
+            ffiasm_src/c/naf.cpp \
+            ffiasm_src/c/splitparstr.cpp \
+            ffiasm_src/c/misc.cpp \
+            /usr/lib/libgtest.a /usr/lib/libgtest_main.a -lgmp -pthread \
+            alt_bn128_test.cpp -o alt_bn128_test
+
+      - name: CPU flags (диагностика на всякий)
+        run: cat /proc/cpuinfo | grep -m1 -i 'flags' || true
+
+      - name: Run all tests
+        run: |
+          ./alt_bn128_test --gtest_color=yes --gtest_output=xml:test-results.xml
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: gtest-results
+          path: test-results.xml
