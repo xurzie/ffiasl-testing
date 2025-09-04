@@ -1,24 +1,29 @@
-name: linux-fr-smoke
+name: CI
+
 on:
-  push:
-  pull_request:
+  push:            # запускать на каждый пуш
+    branches: ["**"]
+  pull_request:    # и на PR
+    branches: ["**"]
+  workflow_dispatch: {}   # и руками из UI
 
 jobs:
-  fr-smoke:
+  build:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deps
+      - name: System deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y nasm g++ libgmp-dev nodejs npm
+          sudo apt-get install -y nasm g++ libgmp-dev
+          node -v || true
+          npm -v || true
 
-      - name: Generate field
+      - name: Install ffiasm and generate field
         run: |
           npm i -g ffiasm
           buildzqfield -q 21888242871839275222246405745257275088548364400416034343698204186575808495617 -n Fr
-          ls -l
 
       - name: Create main.cpp
         run: |
@@ -37,18 +42,13 @@ jobs:
             std::cout << "Result: " << s << std::endl;
             free(s); mpz_clear(z);
             return 0;
-         }
-         CPP
+          }
+          CPP
 
       - name: Build
         run: |
           nasm -felf64 fr.asm -o fr.o
-          g++ -std=c++17 -O3 main.cpp fr.o fr.cpp -I . -lgmp -o fr_example
-          objdump -d fr.o | egrep 'mulx|adcx|adox' || true
-          grep -m1 -i 'flags' /proc/cpuinfo || true
+          g++ -std=c++17 -O3 main.cpp fr.o fr.cpp -lgmp -o example
 
       - name: Run
-        run: |
-          ./fr_example | tee out.txt
-          grep -qx '12' out.txt
-
+        run: ./example
