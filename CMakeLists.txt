@@ -46,24 +46,42 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
 # Собираем тесты из upstream/test + конкретный alt_bn128_test.cpp из upstream/c
-# === ffiasm upstream: реализации кривой ===
-file(GLOB FFIASM_UPSTREAM_C_SOURCES
-  ${FFIASM_VENDOR}/c/*.cpp
+# === ffiasm upstream: минимальный набор реализаций для alt_bn128_test ===
+# ЯВНО перечисляем нужные файлы вместо GLOB всей папки c/
+set(FFIASM_UPSTREAM_C_SOURCES
+  ${FFIASM_VENDOR}/c/alt_bn128.cpp
+  ${FFIASM_VENDOR}/c/curve.cpp
+  ${FFIASM_VENDOR}/c/f2field.cpp
+  ${FFIASM_VENDOR}/c/f6field.cpp
+  ${FFIASM_VENDOR}/c/f12field.cpp
+  ${FFIASM_VENDOR}/c/fft.cpp
+  ${FFIASM_VENDOR}/c/misc.cpp
+  ${FFIASM_VENDOR}/c/naf.cpp
+  ${FFIASM_VENDOR}/c/scalar.cpp
+  ${FFIASM_VENDOR}/c/splitparstr.cpp
 )
-# не тянем сам тест из c/
+
+# На всякий случай: если вдруг эти файлы попадут из прежних GLOB — выкидываем
 list(REMOVE_ITEM FFIASM_UPSTREAM_C_SOURCES
-  ${FFIASM_VENDOR}/c/alt_bn128_test.cpp
+  ${FFIASM_VENDOR}/c/fft_old.cpp
+  ${FFIASM_VENDOR}/c/multiexp.cpp
+  ${FFIASM_VENDOR}/c/msm.cpp
+  ${FFIASM_VENDOR}/c/binfile_utils.cpp
+  ${FFIASM_VENDOR}/c/wtns_utils.cpp
+  ${FFIASM_VENDOR}/c/zkey_utils.cpp
+  ${FFIASM_VENDOR}/c/splitparstr_test.cpp
 )
 
 add_library(ffiasm_upstream STATIC ${FFIASM_UPSTREAM_C_SOURCES})
-target_link_libraries(ffiasm_upstream PRIVATE PkgConfig::GMP)
 target_include_directories(ffiasm_upstream PUBLIC
   ${FFIASM_VENDOR}/c
-  ${FFIASM_GEN_DIR}
+  ${FFIASM_GEN_DIR}                # fr.hpp / fq.hpp от ffiasm CLI
+  ${FFIASM_VENDOR}/test/tester     # на случай header-утилит из tester/
 )
+target_link_libraries(ffiasm_upstream PRIVATE PkgConfig::GMP)
 
 # === тесты ===
-# Берём все helper’ы из test/, НО исключаем их собственный раннер с main()
+# Берём все тестовые хелперы, НО исключаем их собственный main (tester.cpp)
 file(GLOB_RECURSE FFIASM_UPSTREAM_TEST_SOURCES
   ${FFIASM_VENDOR}/test/*.cpp
 )
@@ -76,7 +94,7 @@ add_executable(alt_bn128_tests
   ${FFIASM_UPSTREAM_TEST_SOURCES}
 )
 
-# ВАЖНО: линкуемся с gtest (без gtest_main), чтобы не было второго main
+# Линкуемся без gtest_main, т.к. main уже в alt_bn128_test.cpp
 target_link_libraries(alt_bn128_tests
   PRIVATE
     ffiasm_fields
@@ -84,7 +102,6 @@ target_link_libraries(alt_bn128_tests
     gtest
     PkgConfig::GMP
 )
-
 # Быстрые флаги
 if (MSVC)
   target_compile_options(alt_bn128_tests PRIVATE /O2)
