@@ -32,16 +32,22 @@ jobs:
           #include <stdlib.h>
           #include "fr.hpp"
           int main() {
-            Fr_init();
-            FrElement a{.type=Fr_SHORT,.shortVal=2};
-            FrElement b{.type=Fr_SHORT,.shortVal=6};
-            FrElement c;
-            Fr_mul(&c,&a,&b);
-            char* s=Fr_element2str(&c);
-            printf("%s\n", s);
-            free(s);
+            FrElement a, b, r;
+
+            Fr_fromUI(&a, 2);
+            Fr_fromUI(&b, 6);
+
+            Fr_mul(&r, &a, &b);
+
+            mpz_t z;
+            mpz_init(z);
+            Fr_toMpz(z, &r);
+            gmp_printf("%Zd\n", z);  // должно напечатать 12
+            mpz_clear(z);
+
             return 0;
-          }
+           }
+
           CPP
           nasm -felf64 fr.asm -o fr.o
           g++ -std=c++17 -O3 main.cpp fr.o fr.cpp -lgmp -o example
