@@ -20,6 +20,26 @@ jobs:
           buildzqfield -q 21888242871839275222246405745257275088548364400416034343698204186575808495617 -n Fr
           ls -l
 
+      - name: Create main.cpp
+        run: |
+          cat > main.cpp <<'CPP'
+          #include <gmp.h>
+          #include "fr.hpp"
+          #include <iostream>
+          int main() {
+            FrElement a, b, r;
+            Fr_fromUI(&a, 2);
+            Fr_fromUI(&b, 6);
+            Fr_mul(&r, &a, &b);
+            mpz_t z; mpz_init(z);
+            Fr_toMpz(z, &r);
+            char* s = mpz_get_str(nullptr, 10, z);
+            std::cout << "Result: " << s << std::endl;
+            free(s); mpz_clear(z);
+            return 0;
+         }
+         CPP
+
       - name: Build
         run: |
           nasm -felf64 fr.asm -o fr.o
