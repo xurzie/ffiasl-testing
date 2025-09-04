@@ -87,6 +87,17 @@ target_link_libraries(alt_bn128_tests
     PkgConfig::GMP
 )
 
+# --- CTest + GTest discovery ---
+include(CTest)
+enable_testing()
+
+include(GoogleTest)
+gtest_discover_tests(alt_bn128_tests
+  DISCOVERY_TIMEOUT 60
+  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  # Если захочешь, можно добавить ARGS --gtest_color=yes
+)
+
 # Быстрые флаги
 if (MSVC)
   target_compile_options(alt_bn128_tests PRIVATE /O2)
