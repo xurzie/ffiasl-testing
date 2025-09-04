@@ -16,7 +16,7 @@ jobs:
 
       - name: Sync upstream ffiasm tests
         run: |
-          bash scripts/sync_ffiasm_tests.sh
+          bash sync_ffiasm_tests.sh
         shell: bash
 
       - name: Generate BN254 fields (Fr/Fq)
