@@ -19,12 +19,13 @@ jobs:
           bash sync_ffiasm_tests.sh
         shell: bash
 
-      - name: Generate BN254 fields (Fr/Fq)
+      - name: Generate BN254 fields (Fq/Fr)
         run: |
           npm i -g ffiasm
-          Q=21888242871839275222246405745257275088548364400416034343698204186575808495617
-          buildzqfield -q $Q -n Fr
-          buildzqfield -q $Q -n Fq
+
+          buildzqfield -q 21888242871839275222246405745257275088696311157297823662689037894645226208583 -n Fq
+
+          buildzqfield -q 21888242871839275222246405745257275088548364400416034343698204186575808495617 -n Fr
 
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
